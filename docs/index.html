@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZZK 智能开关控制面板</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 50px; }
+        button { padding: 15px 30px; font-size: 18px; margin: 10px; cursor: pointer; border-radius: 8px; border: none; }
+        #connectBtn { background-color: #007bff; color: white; }
+        #actionBtn { background-color: #28a745; color: white; }
+        #offBtn { background-color: #dc3545; color: white; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .info-box { margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; width: 300px; text-align: center; }
+        .battery { font-size: 24px; font-weight: bold; color: #28a745; }
+    </style>
+</head>
+<body>
+
+    <h1>ZZK 桌面中控台</h1>
+    <button id="connectBtn">1. 连接墙壁开关</button>
+    <button id="actionBtn" disabled>物理开灯</button>
+    <button id="offBtn" disabled>物理关灯</button>
+    
+    <div class="info-box">
+        <p id="statusText">状态：未连接</p>
+        <p>剩余电量: <span id="batteryText" class="battery">--%</span></p>
+    </div>
+
+    <script>
+        // UUID 必须与 C++ 代码保持绝对一致！
+        const SERVICE_UUID = '2d220000-516b-47bd-a33b-2c93889ac9b7';
+        const SWITCH_CHAR_UUID = '2d220001-516b-47bd-a33b-2c93889ac9b7';
+        const BATTERY_CHAR_UUID = '2d220002-516b-47bd-a33b-2c93889ac9b7'; // 新建的电量特征值
+
+        let switchCharacteristic;
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            const statusText = document.getElementById('statusText');
+            try {
+                statusText.innerText = '状态：正在搜索设备...';
+                
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ZZK_Switch' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                statusText.innerText = '状态：正在连接...';
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                
+                // 1. 获取控制开关的特征值
+                switchCharacteristic = await service.getCharacteristic(SWITCH_CHAR_UUID);
+                
+                // 2. 获取读取电池的特征值，并开启通知监听！
+                const batteryCharacteristic = await service.getCharacteristic(BATTERY_CHAR_UUID);
+                await batteryCharacteristic.startNotifications();
+                
+                // 3. 当收到主板推过来的新电量时，触发此函数
+                batteryCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    // 读取硬件发来的一个字节 (uint8_t) 数据
+                    let batteryLevel = event.target.value.getUint8(0);
+                    document.getElementById('batteryText').innerText = batteryLevel + '%';
+                });
+
+                // 为了连上后立刻看到电量，主动先读一次
+                let initialBattery = await batteryCharacteristic.readValue();
+                document.getElementById('batteryText').innerText = initialBattery.getUint8(0) + '%';
+
+                statusText.innerText = '状态：已连接，准备就绪！';
+                document.getElementById('actionBtn').disabled = false; 
+                document.getElementById('offBtn').disabled = false; 
+
+            } catch (error) {
+                console.error("连接失败:", error);
+                statusText.innerText = '状态：连接失败或已取消';
+            }
+        });
+
+        // 开灯按钮逻辑
+        document.getElementById('actionBtn').addEventListener('click', async () => {
+            if (switchCharacteristic) await switchCharacteristic.writeValue(new Uint8Array([0x01]));
+        });
+
+        // 关灯按钮逻辑 (顺手帮你加上了)
+        document.getElementById('offBtn').addEventListener('click', async () => {
+            if (switchCharacteristic) await switchCharacteristic.writeValue(new Uint8Array([0x00]));
+        });
+    </script>
+</body>
+</html>
