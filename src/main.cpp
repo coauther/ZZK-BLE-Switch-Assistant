@@ -1,15 +1,48 @@
 #include <Arduino.h>
 #include <bluefruit.h>
+#include <Servo.h>
+
+#define EN_PIN D2       // 控制 5V 升压模块的使能引脚 (建议选 D2)
+#define SERVO_PIN D3    // 控制舵机 PWM 信号的引脚
 
 BLEService               switchService = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 BLECharacteristic switchChar    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
 BLECharacteristic batteryChar   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
 
+Servo zzkServo;         // 创建舵机对象
+
 void onSwitchWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    if (len > 0) {
-        if (data[0] == 0x01) digitalWrite(LED_BUILTIN, LOW);
-        else if (data[0] == 0x00) digitalWrite(LED_BUILTIN, HIGH);
+    if (len < 1) return;
+
+    uint8_t command = data[0];
+
+    // 1. 激活升压模块电源
+    digitalWrite(EN_PIN, LOW);
+
+    // 2. 充电缓冲延迟 (等待 5V 电压在电容中稳定，极度重要！)
+    delay(50);
+
+    // 3. 连接舵机信号线
+    zzkServo.attach(SERVO_PIN);
+
+    if (command == 0x01) {
+        // 收到开灯指令 (例如：舵机转动到 90 度去按压开关)
+        zzkServo.write(45);
+        delay(500);
+        zzkServo.write(90);
+    } else if (command == 0x00) {
+        // 收到关灯指令 (例如：舵机转回 0 度复位)
+        zzkServo.write(135);
+        delay(500);
+        zzkServo.write(90);
     }
+
+    // 4. 机械动作延迟 (给舵机足够的物理转动时间)
+    delay(500);
+
+    // 5. 切断外设信号与电源，回归微功耗
+    zzkServo.detach();           // 先断开 PWM 信号，防乱抖
+    digitalWrite(EN_PIN, HIGH);   // 彻底关闭 5V 升压模块
 }
 
 void setup() {
@@ -20,6 +53,9 @@ void setup() {
     // 关闭 LED
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, HIGH);
+
+    pinMode(EN_PIN, OUTPUT);
+    digitalWrite(EN_PIN, HIGH); // 确保开机时升压模块是关闭的，防止通电乱转
 
     Bluefruit.begin();
     // 调低发射功率也能省电 (可选范围: -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8)
