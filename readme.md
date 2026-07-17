@@ -27,3 +27,44 @@ The ZZK Switch is responsible for:
 - Measuring the battery voltage through the ADC
 - Converting the ADC value into an estimated battery percentage
 - Sending battery notifications approximately every 10 seconds
+
+## System Architecture
+
+The system uses the CCJ Gateway as a communication bridge between the browser-based user interface and the battery-powered ZZK Switch.
+
+```mermaid
+flowchart TD
+    A["Browser Interface"] -->|"HTTP ON/OFF command"| B["CCJ Gateway (ESP32)"]
+    B -->|"SSE battery update"| A
+    B -->|"BLE control command"| C["ZZK Switch (nRF52840)"]
+    C -->|"BLE battery notification"| B
+    C --> D["Servo Actuator"]
+    D --> E["Physical Wall Switch"]
+```
+
+The system contains two main data flows:
+
+1. **Light control:** The browser sends an HTTP request to the CCJ Gateway. The gateway converts the request into a one-byte BLE command and transmits it to the ZZK Switch, which then operates the servo motor.
+
+2. **Battery monitoring:** The ZZK Switch measures its battery voltage through the ADC and periodically sends the estimated battery percentage through a BLE notification. The CCJ Gateway forwards the latest value to the browser using Server-Sent Events (SSE).
+
+## Hardware and Software
+
+| Category | Component or Technology |
+|---|---|
+| Development board | Seeed Studio XIAO nRF52840 |
+| Programming language | C++ |
+| Development framework | Arduino framework |
+| Wireless communication | Bluetooth Low Energy (BLE) |
+| BLE role | Peripheral |
+| Mechanical actuator | Servo motor |
+| Servo power supply | 5 V boost converter |
+| Battery measurement | 10-bit ADC |
+| Power source | Rechargeable battery |
+| Companion device | uPesy ESP32 Wroom DevKit |
+
+### Main Software Libraries
+
+- `bluefruit` for BLE services, characteristics, and advertising
+- `Servo` for servo motor position control
+- Arduino ADC functions for battery-voltage measurement
