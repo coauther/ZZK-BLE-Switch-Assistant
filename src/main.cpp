@@ -65,6 +65,7 @@ void setup() {
     // 调低发射功率也能省电 (可选范围: -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8)
     Bluefruit.setTxPower(0);
     Bluefruit.setName("ZZK_Switch"); // 现在的空间足够放下完整名字了
+    Bluefruit.autoConnLed(true); //关闭芯片Led功能
 
     switchService.begin();
 
