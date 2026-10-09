@@ -2,8 +2,11 @@
 #include <bluefruit.h>
 #include <Servo.h>
 
-#define EN_PIN D2       // Enable (EN) pin of the 5V boost converter
-#define SERVO_PIN D3    // PWM pin of the servo motor
+#if __has_include("config.h")
+#include "config.h"
+#else
+#include "config.h.example"
+#endif
 
 BLEService               switchService = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 BLECharacteristic switchChar    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
@@ -27,18 +30,18 @@ void onSwitchWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uin
 
     if (command == 0x01) {
         // ON
-        zzkServo.write(20);
-        delay(500);
-        zzkServo.write(90);
+        zzkServo.write(SERVO_ANGLE_ON);
+        delay(SERVO_HOLD_MS);
+        zzkServo.write(SERVO_ANGLE_NEUTRAL);
     } else if (command == 0x00) {
         // OFF
-        zzkServo.write(120);
-        delay(500);
-        zzkServo.write(90);
+        zzkServo.write(SERVO_ANGLE_OFF);
+        delay(SERVO_HOLD_MS);
+        zzkServo.write(SERVO_ANGLE_NEUTRAL);
     }
 
     // Wait for the servo to execute
-    delay(500);
+    delay(SERVO_COOLDOWN_MS);
 
     // Shutdown 5V boost converter and servo
     zzkServo.detach();

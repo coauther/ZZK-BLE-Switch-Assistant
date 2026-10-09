@@ -1,0 +1,21 @@
+#pragma once
+#include <Arduino.h>
+
+// ==========================================
+// Hardware Pin Definitions
+// ==========================================
+#define EN_PIN               D2       // Enable (EN) pin of the 5V boost converter
+#define SERVO_PIN            D3       // PWM pin of the servo motor
+
+// ==========================================
+// Servo Angle Configurations (in degrees)
+// ==========================================
+#define SERVO_ANGLE_ON       20       // Servo angle to press the switch ON
+#define SERVO_ANGLE_OFF      120      // Servo angle to press the switch OFF
+#define SERVO_ANGLE_NEUTRAL  90       // Neutral/idle return position
+
+// ==========================================
+// Timing Configurations (in milliseconds)
+// ==========================================
+#define SERVO_HOLD_MS        500      // Duration to press the switch
+#define SERVO_COOLDOWN_MS    500      // Wait time after returning before power off
