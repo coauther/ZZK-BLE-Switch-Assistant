@@ -8,6 +8,9 @@
 #include "config.h.example"
 #endif
 
+// OTA DFU Service
+static BLEDfu            bledfu;
+
 static BLEService        switch_service = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic switch_char    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic battery_char   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
@@ -107,12 +110,12 @@ void setup(void)
     analogReadResolution(10);
     analogReference(AR_INTERNAL_2_4); // 2.4V internal reference
 
-    // Configure battery measurement pins (P0.14 permanent GND sink for 1.5MΩ divider)
+    // Configure battery measurement pins
     pinMode(PIN_VBAT, INPUT);
     pinMode(VBAT_ENABLE, OUTPUT);
     digitalWrite(VBAT_ENABLE, LOW);
 
-    // Turn off all onboard RGB LEDs (Active LOW on XIAO BLE)
+    // Turn off all onboard RGB LEDs
     pinMode(LED_RED, OUTPUT);
     digitalWrite(LED_RED, HIGH);
     pinMode(LED_GREEN, OUTPUT);
@@ -144,6 +147,9 @@ void setup(void)
     battery_char.setFixedLen(1);
     battery_char.setCccdWriteCallback(battery_cccd_callback);
     battery_char.begin();
+
+    // Initialize OTA DFU service
+    bledfu.begin();
 
     // Read and initialize battery level characteristic
     battery_update_level();
