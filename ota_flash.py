@@ -48,7 +48,16 @@ class LegacyDfuClient:
             self.notification_event.set()
 
     async def start(self):
-        await self.client.start_notify(UUID_DFU_CONTROL, self._notification_handler)
+        # Allow BlueZ GATT discovery and connection parameters to stabilize
+        await asyncio.sleep(0.6)
+        for attempt in range(3):
+            try:
+                await self.client.start_notify(UUID_DFU_CONTROL, self._notification_handler)
+                return
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.6)
 
     async def wait_response(self, expected_op: int, timeout=15.0):
         try:
@@ -155,8 +164,15 @@ async def trigger_dfu_from_app(target_device):
             pass
 
         print("🔔 Enabling DFU Control notifications...")
-        await client.start_notify(UUID_DFU_CONTROL, dummy_cb)
-        await asyncio.sleep(0.5)
+        for attempt in range(3):
+            try:
+                await client.start_notify(UUID_DFU_CONTROL, dummy_cb)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
         print("⚡ Sending reboot to DFU Bootloader command...")
         try:

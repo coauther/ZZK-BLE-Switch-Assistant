@@ -7,3 +7,7 @@ lib
 # User-specific local configuration
 src/config.h
 config.h
+
+# Python cache
+__pycache__/
+*.pyc
