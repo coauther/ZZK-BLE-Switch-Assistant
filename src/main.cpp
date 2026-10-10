@@ -8,6 +8,10 @@
 #include "config.h.example"
 #endif
 
+#ifndef BATTERY_CHECK_MS
+#define BATTERY_CHECK_MS     300000
+#endif
+
 // Pin definitions fallback for battery sensing
 #if !defined(PIN_VBAT_ENABLE) && defined(VBAT_ENABLE)
 #define PIN_VBAT_ENABLE      VBAT_ENABLE
@@ -18,6 +22,7 @@ BLECharacteristic switchChar    = BLECharacteristic("2d220001-516b-47bd-a33b-2c9
 BLECharacteristic batteryChar   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
 
 Servo zzkServo;
+TimerHandle_t batteryTimer;
 
 void updateBatteryLevel() {
     // Enable battery divider circuit (active low on XIAO BLE)
@@ -46,6 +51,11 @@ void updateBatteryLevel() {
     if (Bluefruit.connected() && batteryChar.notifyEnabled()) {
         batteryChar.notify8(battery_level);
     }
+}
+
+void batteryTimerCallback(TimerHandle_t xTimer) {
+    (void)xTimer;
+    updateBatteryLevel();
 }
 
 void onBatteryCccdWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value) {
@@ -132,6 +142,12 @@ void setup() {
     // Read and initialize battery level characteristic
     updateBatteryLevel();
 
+    // Start periodic software timer for battery reporting
+    batteryTimer = xTimerCreate("vbat_timer", pdMS_TO_TICKS(BATTERY_CHECK_MS), pdTRUE, NULL, batteryTimerCallback);
+    if (batteryTimer != NULL) {
+        xTimerStart(batteryTimer, 0);
+    }
+
     // Main advertising pack (service uuid)
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
     Bluefruit.Advertising.addService(switchService);
@@ -143,17 +159,11 @@ void setup() {
     // Set advertising interval
     Bluefruit.Advertising.setInterval(320, 1600);
     Bluefruit.Advertising.start(0);
+
+    // Suspend loop task since all tasks are event-driven
+    suspendLoop();
 }
 
 void loop() {
-    static uint32_t last_check = 0;
-
-    // Report battery level (per 10 seconds)
-    if (millis() - last_check > 10000) {
-        last_check = millis();
-        updateBatteryLevel();
-    }
-
-    // Delay for system sleep
-    delay(100);
+    // Loop task is suspended via suspendLoop() in setup()
 }
