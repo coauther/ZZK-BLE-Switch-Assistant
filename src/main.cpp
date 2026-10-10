@@ -133,7 +133,12 @@ void setup(void)
 
     // Set Bluetooth radio power (range: -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8)
     Bluefruit.setTxPower(0);
-    Bluefruit.setName("ZZK-SA2");
+
+    // Set device name with last 4 MAC digits (e.g. ZZK-SA2-A1B2)
+    ble_gap_addr_t mac = Bluefruit.getAddr();
+    char dev_name[16];
+    snprintf(dev_name, sizeof(dev_name), "ZZK-SA2-%02X%02X", mac.addr[1], mac.addr[0]);
+    Bluefruit.setName(dev_name);
 
     switch_service.begin();
 

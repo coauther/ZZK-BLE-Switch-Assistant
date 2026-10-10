@@ -12,7 +12,7 @@ This guide provides the complete configuration breakdown, covering the physical 
 
 You can discover the Bluetooth MAC address of ZZK-SA2 using either of the following methods:
 
-1. **Mobile App Scanning**: Use a BLE tool like **nRF Connect for Mobile** on your phone, scan for nearby devices, find `ZZK-SA2`, and remember its MAC address (e.g., `C1:23:45:67:89:AB`).
+1. **Mobile App Scanning**: Use a BLE tool like **nRF Connect for Mobile** on your phone, scan for nearby devices, find `ZZK-SA2` (or `ZZK-SA2-XXXX`), and remember its MAC address (e.g., `C1:23:45:67:89:AB`).
 2. **ESPHome Console Logs**: Add `esp32_ble_tracker:` to your ESP32 configuration and flash it. In the serial/wireless logs, locate the captured `[ZZK-SA2]` advertisement and its corresponding MAC address.
 
 ---

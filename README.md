@@ -107,7 +107,7 @@ The battery sensing circuit is fully integrated into the Seeed Studio XIAO nRF52
 
 | Parameter | Value | Notes |
 |---|---|---|
-| Device Name | `ZZK-SA2` | Broadcast in Scan Response |
+| Device Name | `ZZK-SA2-[XXXX]` | Broadcast in Scan Response (e.g., `ZZK-SA2-A1B2` with last 4 MAC hex digits) |
 | Advertising Interval | 200 ~ 1000 ms | Fast advertising 200 ms, falling back to 1000 ms slow advertising |
 | TX Power | 0 dBm | Balanced nRF52840 default |
 | Device Role | BLE Peripheral | Single-peripheral mode; stops advertising once connected |

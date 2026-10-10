@@ -12,7 +12,7 @@
 
 你可以通过以下任意方式获取 ZZK-SA2 的蓝牙 MAC 地址：
 
-1. **手机 App 扫描**：在手机上使用 **nRF Connect for Mobile** 等 BLE 调试工具，扫描设备列表找到 `ZZK-SA2`，记录其 MAC 地址（如 `C1:23:45:67:89:AB`）。
+1. **手机 App 扫描**：在手机上使用 **nRF Connect for Mobile** 等 BLE 调试工具，扫描设备列表找到 `ZZK-SA2`（或 `ZZK-SA2-XXXX`），记录其 MAC 地址（如 `C1:23:45:67:89:AB`）。
 2. **ESPHome 日志扫描**：在 ESP32 配置中开启 `esp32_ble_tracker:` 并烧录，在控制台日志中查看捕获到的 `[ZZK-SA2]` 广播与对应 MAC 地址。
 
 ---
