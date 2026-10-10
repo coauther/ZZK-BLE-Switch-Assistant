@@ -8,15 +8,6 @@
 #include "config.h.example"
 #endif
 
-#ifndef BATTERY_CHECK_MS
-#define BATTERY_CHECK_MS     300000
-#endif
-
-// Pin definitions fallback for battery sensing
-#if !defined(PIN_VBAT_ENABLE) && defined(VBAT_ENABLE)
-#define PIN_VBAT_ENABLE      VBAT_ENABLE
-#endif
-
 static BLEService        switch_service = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic switch_char    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic battery_char   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
@@ -26,15 +17,13 @@ static TimerHandle_t     battery_timer;
 
 static void battery_update_level(void)
 {
-    // Enable battery divider circuit (active low on XIAO BLE)
-    digitalWrite(PIN_VBAT_ENABLE, LOW);
-    delayMicroseconds(50);
-
-    // Read ADC value
-    int raw = analogRead(PIN_VBAT);
-
-    // Disable battery divider circuit immediately to prevent parasitic battery drain
-    digitalWrite(PIN_VBAT_ENABLE, HIGH);
+    // Multiple-sample averaging
+    uint32_t adc_sum = 0;
+    for (int i = 0; i < 8; i++) {
+        adc_sum += analogRead(PIN_VBAT);
+        delay(1);
+    }
+    int raw = adc_sum / 8;
 
     // Calculate actual battery voltage in millivolts
     // 2.4V internal reference, 10-bit resolution (1023), resistor divider (1000k + 510k) / 510k
@@ -118,20 +107,27 @@ void setup(void)
     analogReadResolution(10);
     analogReference(AR_INTERNAL_2_4); // 2.4V internal reference
 
-    // Configure battery measurement pins
+    // Configure battery measurement pins (P0.14 permanent GND sink for 1.5MΩ divider)
     pinMode(PIN_VBAT, INPUT);
-    pinMode(PIN_VBAT_ENABLE, OUTPUT);
-    digitalWrite(PIN_VBAT_ENABLE, HIGH); // Keep divider turned off initially to save power
+    pinMode(VBAT_ENABLE, OUTPUT);
+    digitalWrite(VBAT_ENABLE, LOW);
 
-    // Disable onboard LED
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, HIGH);
+    // Turn off all onboard RGB LEDs (Active LOW on XIAO BLE)
+    pinMode(LED_RED, OUTPUT);
+    digitalWrite(LED_RED, HIGH);
+    pinMode(LED_GREEN, OUTPUT);
+    digitalWrite(LED_GREEN, HIGH);
+    pinMode(LED_BLUE, OUTPUT);
+    digitalWrite(LED_BLUE, HIGH);
 
     // Initialize 5V boost converter (turned off at first)
     pinMode(EN_PIN, OUTPUT);
     digitalWrite(EN_PIN, HIGH);
 
     Bluefruit.begin();
+    // Disable automatic status LED blinking during advertising and connection
+    Bluefruit.autoConnLed(false);
+
     // Set Bluetooth radio power (range: -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8)
     Bluefruit.setTxPower(0);
     Bluefruit.setName("ZZK-SA2");
