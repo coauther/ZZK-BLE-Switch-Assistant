@@ -1,0 +1,2 @@
+# Exclude Python scripts from GitHub Linguist language statistics
+*.py linguist-detectable=false
