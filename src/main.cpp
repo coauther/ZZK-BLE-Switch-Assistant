@@ -17,14 +17,15 @@
 #define PIN_VBAT_ENABLE      VBAT_ENABLE
 #endif
 
-BLEService               switchService = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
-BLECharacteristic switchChar    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
-BLECharacteristic batteryChar   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
+static BLEService        switch_service = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
+static BLECharacteristic switch_char    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
+static BLECharacteristic battery_char   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
 
-Servo zzkServo;
-TimerHandle_t batteryTimer;
+static Servo             servo;
+static TimerHandle_t     battery_timer;
 
-void updateBatteryLevel() {
+static void battery_update_level(void)
+{
     // Enable battery divider circuit (active low on XIAO BLE)
     digitalWrite(PIN_VBAT_ENABLE, LOW);
     delayMicroseconds(50);
@@ -45,30 +46,38 @@ void updateBatteryLevel() {
     uint8_t battery_level = (uint8_t)constrain(percentage, 0, 100);
 
     // Update local characteristic value for read requests
-    batteryChar.write8(battery_level);
+    battery_char.write8(battery_level);
 
     // Notify connected central if notifications are enabled
-    if (Bluefruit.connected() && batteryChar.notifyEnabled()) {
-        batteryChar.notify8(battery_level);
+    if (Bluefruit.connected() && battery_char.notifyEnabled()) {
+        battery_char.notify8(battery_level);
     }
 }
 
-void batteryTimerCallback(TimerHandle_t xTimer) {
-    (void)xTimer;
-    updateBatteryLevel();
+static void battery_timer_callback(TimerHandle_t p_timer)
+{
+    (void)p_timer;
+    battery_update_level();
 }
 
-void onBatteryCccdWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value) {
+static void battery_cccd_callback(uint16_t conn_hdl, BLECharacteristic *p_chr, uint16_t cccd_value)
+{
     (void)cccd_value;
-    if (chr->notifyEnabled(conn_hdl)) {
-        updateBatteryLevel();
+    if (p_chr->notifyEnabled(conn_hdl)) {
+        battery_update_level();
     }
 }
 
-void onSwitchWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-    if (len < 1) return;
+static void switch_write_callback(uint16_t conn_hdl, BLECharacteristic *p_chr, uint8_t *p_data, uint16_t len)
+{
+    (void)conn_hdl;
+    (void)p_chr;
 
-    uint8_t command = data[0];
+    if (len < 1) {
+        return;
+    }
+
+    uint8_t command = p_data[0];
 
     // Enable 5V boost converter
     digitalWrite(EN_PIN, LOW);
@@ -77,29 +86,30 @@ void onSwitchWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uin
     delay(50);
 
     // Attach servo pin
-    zzkServo.attach(SERVO_PIN);
+    servo.attach(SERVO_PIN);
 
     if (command == 0x01) {
         // ON
-        zzkServo.write(SERVO_ANGLE_ON);
+        servo.write(SERVO_ANGLE_ON);
         delay(SERVO_HOLD_MS);
-        zzkServo.write(SERVO_ANGLE_NEUTRAL);
+        servo.write(SERVO_ANGLE_NEUTRAL);
     } else if (command == 0x00) {
         // OFF
-        zzkServo.write(SERVO_ANGLE_OFF);
+        servo.write(SERVO_ANGLE_OFF);
         delay(SERVO_HOLD_MS);
-        zzkServo.write(SERVO_ANGLE_NEUTRAL);
+        servo.write(SERVO_ANGLE_NEUTRAL);
     }
 
     // Wait for the servo to execute
     delay(SERVO_COOLDOWN_MS);
 
     // Shutdown 5V boost converter and servo
-    zzkServo.detach();
+    servo.detach();
     digitalWrite(EN_PIN, HIGH);
 }
 
-void setup() {
+void setup(void)
+{
     // Low-power configuration
     NRF_POWER->DCDCEN = 1; // Enable DCDC
     NRF_USBD->ENABLE = 0;  // Disable USB peripherals
@@ -126,31 +136,31 @@ void setup() {
     Bluefruit.setTxPower(0);
     Bluefruit.setName("ZZK-SA2");
 
-    switchService.begin();
+    switch_service.begin();
 
-    switchChar.setProperties(CHR_PROPS_WRITE);
-    switchChar.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    switchChar.setWriteCallback(onSwitchWrite);
-    switchChar.begin();
+    switch_char.setProperties(CHR_PROPS_WRITE);
+    switch_char.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+    switch_char.setWriteCallback(switch_write_callback);
+    switch_char.begin();
 
-    batteryChar.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
-    batteryChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-    batteryChar.setFixedLen(1);
-    batteryChar.setCccdWriteCallback(onBatteryCccdWrite);
-    batteryChar.begin();
+    battery_char.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
+    battery_char.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    battery_char.setFixedLen(1);
+    battery_char.setCccdWriteCallback(battery_cccd_callback);
+    battery_char.begin();
 
     // Read and initialize battery level characteristic
-    updateBatteryLevel();
+    battery_update_level();
 
     // Start periodic software timer for battery reporting
-    batteryTimer = xTimerCreate("vbat_timer", pdMS_TO_TICKS(BATTERY_CHECK_MS), pdTRUE, NULL, batteryTimerCallback);
-    if (batteryTimer != NULL) {
-        xTimerStart(batteryTimer, 0);
+    battery_timer = xTimerCreate("vbat_timer", pdMS_TO_TICKS(BATTERY_CHECK_MS), pdTRUE, NULL, battery_timer_callback);
+    if (battery_timer != NULL) {
+        xTimerStart(battery_timer, 0);
     }
 
     // Main advertising pack (service uuid)
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addService(switchService);
+    Bluefruit.Advertising.addService(switch_service);
 
     // Scan Response (device name)
     Bluefruit.ScanResponse.addName();
@@ -164,6 +174,7 @@ void setup() {
     suspendLoop();
 }
 
-void loop() {
+void loop(void)
+{
     // Loop task is suspended via suspendLoop() in setup()
 }
