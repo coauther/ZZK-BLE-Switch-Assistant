@@ -8,11 +8,52 @@
 #include "config.h.example"
 #endif
 
+// Pin definitions fallback for battery sensing
+#if !defined(PIN_VBAT_ENABLE) && defined(VBAT_ENABLE)
+#define PIN_VBAT_ENABLE      VBAT_ENABLE
+#endif
+
 BLEService               switchService = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 BLECharacteristic switchChar    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
 BLECharacteristic batteryChar   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
 
 Servo zzkServo;
+
+void updateBatteryLevel() {
+    // Enable battery divider circuit (active low on XIAO BLE)
+    digitalWrite(PIN_VBAT_ENABLE, LOW);
+    delayMicroseconds(50);
+
+    // Read ADC value
+    int raw = analogRead(PIN_VBAT);
+
+    // Disable battery divider circuit immediately to prevent parasitic battery drain
+    digitalWrite(PIN_VBAT_ENABLE, HIGH);
+
+    // Calculate actual battery voltage in millivolts
+    // 2.4V internal reference, 10-bit resolution (1023), resistor divider (1000k + 510k) / 510k
+    float pin_voltage_mv = (raw * 2400.0f) / 1023.0f;
+    uint32_t vbat_mv = (uint32_t)(pin_voltage_mv * (1510.0f / 510.0f));
+
+    // Map 3.3V (empty) - 4.2V (full) to 0 - 100%
+    int percentage = map(vbat_mv, 3300, 4200, 0, 100);
+    uint8_t battery_level = (uint8_t)constrain(percentage, 0, 100);
+
+    // Update local characteristic value for read requests
+    batteryChar.write8(battery_level);
+
+    // Notify connected central if notifications are enabled
+    if (Bluefruit.connected() && batteryChar.notifyEnabled()) {
+        batteryChar.notify8(battery_level);
+    }
+}
+
+void onBatteryCccdWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value) {
+    (void)cccd_value;
+    if (chr->notifyEnabled(conn_hdl)) {
+        updateBatteryLevel();
+    }
+}
 
 void onSwitchWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     if (len < 1) return;
@@ -53,8 +94,14 @@ void setup() {
     NRF_POWER->DCDCEN = 1; // Enable DCDC
     NRF_USBD->ENABLE = 0;  // Disable USB peripherals
 
-    // Set ADC resolution
+    // Set ADC resolution and reference
     analogReadResolution(10);
+    analogReference(AR_INTERNAL_2_4); // 2.4V internal reference
+
+    // Configure battery measurement pins
+    pinMode(PIN_VBAT, INPUT);
+    pinMode(PIN_VBAT_ENABLE, OUTPUT);
+    digitalWrite(PIN_VBAT_ENABLE, HIGH); // Keep divider turned off initially to save power
 
     // Disable onboard LED
     pinMode(LED_BUILTIN, OUTPUT);
@@ -79,7 +126,11 @@ void setup() {
     batteryChar.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
     batteryChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
     batteryChar.setFixedLen(1);
+    batteryChar.setCccdWriteCallback(onBatteryCccdWrite);
     batteryChar.begin();
+
+    // Read and initialize battery level characteristic
+    updateBatteryLevel();
 
     // Main advertising pack (service uuid)
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -94,26 +145,15 @@ void setup() {
     Bluefruit.Advertising.start(0);
 }
 
- void loop() {
-     static uint32_t last_check = 0;
+void loop() {
+    static uint32_t last_check = 0;
 
-     // Report battery level (per 10 seconds)
-     if (millis() - last_check > 10000) {
-         last_check = millis();
-
-         // ADC read
-         int raw = analogRead(PIN_VBAT);
-
-         // Map ADC value to percentage
-         int percentage = map(raw, 700, 890, 0, 100);
-         uint8_t battery_level = (uint8_t)constrain(percentage, 0, 100);
-
-         // Notify the battery level
-         if (Bluefruit.connected()) {
-             batteryChar.notify8(battery_level);
-         }
-     }
+    // Report battery level (per 10 seconds)
+    if (millis() - last_check > 10000) {
+        last_check = millis();
+        updateBatteryLevel();
+    }
 
     // Delay for system sleep
     delay(100);
- }
+}
