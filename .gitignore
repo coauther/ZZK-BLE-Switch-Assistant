@@ -1,13 +1,33 @@
+# PlatformIO & Build
 .pio
-.idea
 include
 test
 lib
+
+# IDE & Editor files
+.idea/
+.vscode/
+
+# Language Servers
+.clangd/
+.ccls-cache/
+compile_commands.json
+
+# Temporary & System files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
 
 # User-specific local configuration
 src/config.h
 config.h
 
-# Python cache
+# Python environment and cache
 __pycache__/
-*.pyc
+*.py[cod]
+venv/
+.venv/
