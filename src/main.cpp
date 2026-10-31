@@ -14,9 +14,16 @@ static BLEDfu            bledfu;
 static BLEService        switch_service = BLEService("2d220000-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic switch_char    = BLECharacteristic("2d220001-516b-47bd-a33b-2c93889ac9b7");
 static BLECharacteristic battery_char   = BLECharacteristic("2d220002-516b-47bd-a33b-2c93889ac9b7");
+#if ENABLE_BINARY_SENSORS
+static BLECharacteristic binary_sensor_char = BLECharacteristic("2d220003-516b-47bd-a33b-2c93889ac9b7");
+#endif
 
 static Servo             servo;
 static TimerHandle_t     battery_timer;
+#if ENABLE_BINARY_SENSORS
+static TimerHandle_t     sensor_debounce_timer;
+static volatile uint8_t  current_binary_state = 0;
+#endif
 
 static void battery_update_level(void)
 {
@@ -59,6 +66,56 @@ static void battery_cccd_callback(uint16_t conn_hdl, BLECharacteristic *p_chr, u
         battery_update_level();
     }
 }
+
+#if ENABLE_BINARY_SENSORS
+static uint8_t binary_sensor_read_state(void)
+{
+    uint8_t state = 0;
+    for (uint8_t i = 0; i < NUM_BINARY_SENSORS; i++) {
+        int val = digitalRead(BINARY_SENSORS[i].pin);
+        bool is_active = BINARY_SENSORS[i].active_low ? (val == LOW) : (val == HIGH);
+        if (is_active) {
+            state |= (1 << i);
+        }
+    }
+    return state;
+}
+
+static void binary_sensor_update(bool force_notify = false)
+{
+    uint8_t state = binary_sensor_read_state();
+    if (force_notify || (state != current_binary_state)) {
+        current_binary_state = state;
+        binary_sensor_char.write8(state);
+        if (Bluefruit.connected() && binary_sensor_char.notifyEnabled()) {
+            binary_sensor_char.notify8(state);
+        }
+    }
+}
+
+static void sensor_debounce_timer_callback(TimerHandle_t p_timer)
+{
+    (void)p_timer;
+    binary_sensor_update(false);
+}
+
+static void sensor_isr(void)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if (sensor_debounce_timer != NULL) {
+        xTimerResetFromISR(sensor_debounce_timer, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+}
+
+static void binary_sensor_cccd_callback(uint16_t conn_hdl, BLECharacteristic *p_chr, uint16_t cccd_value)
+{
+    (void)cccd_value;
+    if (p_chr->notifyEnabled(conn_hdl)) {
+        binary_sensor_update(true);
+    }
+}
+#endif
 
 static void switch_write_callback(uint16_t conn_hdl, BLECharacteristic *p_chr, uint8_t *p_data, uint16_t len)
 {
@@ -152,6 +209,27 @@ void setup(void)
     battery_char.setFixedLen(1);
     battery_char.setCccdWriteCallback(battery_cccd_callback);
     battery_char.begin();
+
+#if ENABLE_BINARY_SENSORS
+    binary_sensor_char.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
+    binary_sensor_char.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    binary_sensor_char.setFixedLen(1);
+    binary_sensor_char.setCccdWriteCallback(binary_sensor_cccd_callback);
+    binary_sensor_char.begin();
+
+    // Initialize one-shot software debounce timer
+    sensor_debounce_timer = xTimerCreate("deb_timer", pdMS_TO_TICKS(SENSOR_DEBOUNCE_MS), pdFALSE, NULL, sensor_debounce_timer_callback);
+
+    // Configure pins and attach wake-up interrupts
+    for (uint8_t i = 0; i < NUM_BINARY_SENSORS; i++) {
+        pinMode(BINARY_SENSORS[i].pin, BINARY_SENSORS[i].pin_mode);
+        attachInterrupt(digitalPinToInterrupt(BINARY_SENSORS[i].pin), sensor_isr, CHANGE);
+    }
+
+    // Read and initialize binary sensor characteristic value
+    current_binary_state = binary_sensor_read_state();
+    binary_sensor_char.write8(current_binary_state);
+#endif
 
     // Initialize OTA DFU service
     bledfu.begin();
