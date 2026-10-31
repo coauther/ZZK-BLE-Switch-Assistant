@@ -4,7 +4,7 @@
 
 将 ZZK-SA2 接入 Home Assistant 最推荐的方式是使用一块常供电的 ESP32 开发板运行 [ESPHome](https://esphome.io/) 作为 BLE 网关。
 
-本指南提供了完整的配置说明，包括物理开关实体、电量实体、在线状态监测，以及 180 秒自动倒计时 OTA 维护模式。
+本指南提供了完整的配置说明，包括物理开关实体、电量实体、在线状态监测、扩展二进制传感器（如门磁），以及 180 秒自动倒计时 OTA 维护模式。
 
 ---
 
@@ -101,6 +101,45 @@ sensor:
       return {};
 ```
 
+### E. 扩展二进制传感器（如门磁 / 人体红外）
+订阅二进制传感器特征值 `2d220003`，并在接收到 1 字节状态 Bitmask 时直接将其解包并发布到对应的 Home Assistant 模板实体：
+
+```yaml
+binary_sensor:
+  # 门磁实体 (Home Assistant 识别为门窗图标)
+  - platform: template
+    name: "ZZK Door Sensor"
+    id: zzk_door
+    device_class: door
+
+sensor:
+  # 二进制传感器原始 Bitmask 接收解码器
+  - platform: ble_client
+    ble_client_id: zzk_sa2
+    id: zzk_binary_raw
+    type: characteristic
+    internal: true                    # 隐藏原始数值实体，不在 HA 界面显示杂项
+    service_uuid: "2d220000-516b-47bd-a33b-2c93889ac9b7"
+    characteristic_uuid: "2d220003-516b-47bd-a33b-2c93889ac9b7"
+    notify: true
+    update_interval: 60s
+    force_update: true
+    lambda: |-
+      if (!x.empty()) {
+        uint8_t raw = x[0];
+        // Bit 0 映射至门磁 (HA 规范: true=开门 Open, false=关门 Closed)
+        bool is_open = (raw & (1 << 0)) != 0;
+        id(zzk_door).publish_state(is_open);
+        return (float)raw;
+      }
+      return {};
+```
+
+> [!IMPORTANT]
+> **ESPhome 的 GATT 属性缓存**：
+> 若你的 ESP32 网关配置了 `bluetooth_proxy: active: true`，底层 ESP-IDF 会默认在 NVS 闪存中持久化缓存外设的 GATT 属性表。若设备在新增特征值前曾连接过该 ESP32，网关可能会读取旧缓存导致找不到 `2d220003`（日志报错 `Cannot poll, not connected`）。
+> **解决方法**：在 `bluetooth_proxy` 配置项下添加 `cache_services: false` 禁用缓存，强制 ESP32 每次连接时重新获取外设完整的最新特征值列表。
+
 ---
 
 ## 3. 防抢占维护模式
@@ -150,6 +189,11 @@ switch:
 ```yaml
 esp32_ble_tracker:
 
+# 若启用了蓝牙代理，建议禁用 NVS GATT 服务缓存以确保及时识别新增特征值
+bluetooth_proxy:
+  active: true
+  cache_services: false
+
 # 1. 蓝牙连接倒计时维护脚本
 script:
   - id: script_zzk_ota_countdown
@@ -174,14 +218,19 @@ ble_client:
             id: zzk_ble_connected
             state: OFF
 
-# 3. 在线状态实体
+# 3. 实体列表（连接状态与门磁传感器）
 binary_sensor:
   - platform: template
     name: "ZZK Connected"
     id: zzk_ble_connected
     device_class: connectivity
 
-# 4. 电量传感器实体
+  - platform: template
+    name: "ZZK Door Sensor"
+    id: zzk_door
+    device_class: door
+
+# 4. 传感器实体（电量采集与二进制原始数据解包）
 sensor:
   - platform: ble_client
     ble_client_id: zzk_sa2
@@ -198,6 +247,26 @@ sensor:
     lambda: |-
       if (x.size() > 0) {
         return (float)x[0];
+      }
+      return {};
+
+  - platform: ble_client
+    ble_client_id: zzk_sa2
+    id: zzk_binary_raw
+    type: characteristic
+    internal: true
+    service_uuid: "2d220000-516b-47bd-a33b-2c93889ac9b7"
+    characteristic_uuid: "2d220003-516b-47bd-a33b-2c93889ac9b7"
+    notify: true
+    update_interval: 60s
+    force_update: true
+    lambda: |-
+      if (!x.empty()) {
+        uint8_t raw = x[0];
+        // Bit 0 映射为门磁 (true=Open, false=Closed)
+        bool is_open = (raw & (1 << 0)) != 0;
+        id(zzk_door).publish_state(is_open);
+        return (float)raw;
       }
       return {};
 
@@ -237,3 +306,4 @@ switch:
           id(zzk_sa2)->disconnect();
       - script.execute: script_zzk_ota_countdown
 ```
+

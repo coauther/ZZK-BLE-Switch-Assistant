@@ -20,3 +20,25 @@
 #define SERVO_HOLD_MS        500      // Duration to press the switch
 #define SERVO_COOLDOWN_MS    500      // Wait time after returning before power off
 #define BATTERY_CHECK_MS     300000   // Battery reporting interval (default: 300s)
+
+// ==========================================
+// Binary Sensor Configurations
+// ==========================================
+#define ENABLE_BINARY_SENSORS  0       // 1 to enable external binary sensors, 0 to disable
+#define SENSOR_DEBOUNCE_MS     30      // Debounce filter window in milliseconds
+
+struct BinarySensorConfig {
+    uint8_t pin;
+    uint8_t pin_mode;     // INPUT, INPUT_PULLUP, INPUT_PULLDOWN
+    bool    active_low;   // true: active when LOW (reported as 1 in bitmask); false: active when HIGH
+};
+
+// Pins: D8, D9, D10 (Comment or delete the sensor configurations you don't need.)
+static const BinarySensorConfig BINARY_SENSORS[] = {
+    { D8,  INPUT_PULLUP, true  }, // CH0 (Bit 0): e.g. door reed switch to GND (LOW = closed = 1)
+    { D9,  INPUT,        false }, // CH1 (Bit 1): e.g. PIR sensor (HIGH = motion = 1)
+    { D10, INPUT_PULLUP, true  }  // CH2 (Bit 2): e.g. external button to GND (LOW = pressed = 1)
+};
+
+static const uint8_t NUM_BINARY_SENSORS = sizeof(BINARY_SENSORS) / sizeof(BINARY_SENSORS[0]);
+
