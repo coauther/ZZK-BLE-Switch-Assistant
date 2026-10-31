@@ -4,7 +4,7 @@
 
 The recommended way to integrate ZZK-SA2 into Home Assistant is by using an always-powered ESP32 development board running [ESPHome](https://esphome.io/) as a BLE gateway (BLE client).
 
-This guide provides the complete configuration breakdown, covering the physical switch entity, battery sensor, connection state monitoring, and the 180-second auto-reconnecting OTA maintenance mode.
+This guide provides the complete configuration breakdown, covering the physical switch entity, battery sensor, connection state monitoring, external binary sensors (e.g. door reed switch), and the 180-second auto-reconnecting OTA maintenance mode.
 
 ---
 
@@ -101,6 +101,45 @@ sensor:
       return {};
 ```
 
+### E. External Binary Sensors (e.g., Door Reed Switch / Motion)
+Subscribes to notifications on characteristic `2d220003-516b-47bd-a33b-2c93889ac9b7`, unpacks the 1-byte state bitmask inside `lambda`, and publishes directly to Home Assistant template binary sensor entities:
+
+```yaml
+binary_sensor:
+  # Door sensor entity (Home Assistant assigns door icon and Open/Closed state)
+  - platform: template
+    name: "ZZK Door Sensor"
+    id: zzk_door
+    device_class: door
+
+sensor:
+  # Raw binary sensor bitmask decoder
+  - platform: ble_client
+    ble_client_id: zzk_sa2
+    id: zzk_binary_raw
+    type: characteristic
+    internal: true                    # Hide raw numeric entity from Home Assistant dashboard
+    service_uuid: "2d220000-516b-47bd-a33b-2c93889ac9b7"
+    characteristic_uuid: "2d220003-516b-47bd-a33b-2c93889ac9b7"
+    notify: true
+    update_interval: 60s
+    force_update: true
+    lambda: |-
+      if (!x.empty()) {
+        uint8_t raw = x[0];
+        // Bit 0 mapped to door sensor (HA convention: true=Open, false=Closed)
+        bool is_open = (raw & (1 << 0)) != 0;
+        id(zzk_door).publish_state(is_open);
+        return (float)raw;
+      }
+      return {};
+```
+
+> [!IMPORTANT]
+> **ESPHome GATT Attribute Caching**:
+> If your ESP32 node runs `bluetooth_proxy: active: true`, the underlying ESP-IDF stack caches peer GATT services in NVS flash by default. If the ESP32 connected to ZZK-SA2 prior to adding the new characteristic, it may read the stale cache and fail to discover `2d220003` (logging `Cannot poll, not connected`).
+> **Solution**: Add `cache_services: false` under `bluetooth_proxy` to disable persistent caching and force fresh over-the-air service discovery upon connection.
+
 ---
 
 ## 3. Maintenance Mode to Prevent BLE Preemption
@@ -150,6 +189,11 @@ Merge the following snippet directly into your existing ESPHome node YAML config
 ```yaml
 esp32_ble_tracker:
 
+# If bluetooth_proxy is enabled, disabling GATT service caching is recommended to discover new characteristics
+bluetooth_proxy:
+  active: true
+  cache_services: false
+
 # 1. BLE connection countdown maintenance script
 script:
   - id: script_zzk_ota_countdown
@@ -174,14 +218,19 @@ ble_client:
             id: zzk_ble_connected
             state: OFF
 
-# 3. Connection status entity
+# 3. Entity definitions (connectivity and door sensor)
 binary_sensor:
   - platform: template
     name: "ZZK Connected"
     id: zzk_ble_connected
     device_class: connectivity
 
-# 4. Battery sensor entity
+  - platform: template
+    name: "ZZK Door Sensor"
+    id: zzk_door
+    device_class: door
+
+# 4. Sensor entities (battery level and raw binary sensor decoding)
 sensor:
   - platform: ble_client
     ble_client_id: zzk_sa2
@@ -198,6 +247,26 @@ sensor:
     lambda: |-
       if (x.size() > 0) {
         return (float)x[0];
+      }
+      return {};
+
+  - platform: ble_client
+    ble_client_id: zzk_sa2
+    id: zzk_binary_raw
+    type: characteristic
+    internal: true
+    service_uuid: "2d220000-516b-47bd-a33b-2c93889ac9b7"
+    characteristic_uuid: "2d220003-516b-47bd-a33b-2c93889ac9b7"
+    notify: true
+    update_interval: 60s
+    force_update: true
+    lambda: |-
+      if (!x.empty()) {
+        uint8_t raw = x[0];
+        // Bit 0 mapped to door sensor (true=Open, false=Closed)
+        bool is_open = (raw & (1 << 0)) != 0;
+        id(zzk_door).publish_state(is_open);
+        return (float)raw;
       }
       return {};
 

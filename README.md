@@ -2,11 +2,11 @@
 
 **English** | [中文](README.zh-CN.md)
 
-[Quick Start](#quick-start) · [Hardware](#hardware) · [BLE Interface](#ble-interface) · [OTA Update](#OTA Firmware Update) · [Known Limitations](#known-limitations)
+[Quick Start](#quick-start) · [Hardware](#hardware) · [BLE Interface](#ble-interface) · [OTA Update](#ota-firmware-update) · [Known Limitations](#known-limitations)
 
 > Turn off the lights without leaving your warm bed.
 
-ZZK-SA2 is a battery-powered BLE wireless actuator that uses a servo motor to physically operate an existing wall switch. Optimized for low-power operation, with Home Assistant integration.
+ZZK-SA2 is a battery-powered BLE wireless actuator that uses a servo motor to physically operate an existing wall switch, and supports external binary sensor expansion (e.g. door reed switch, PIR motion sensors). Optimized for low-power operation, with Home Assistant integration.
 
 ![ZZK-SA2 Assembled Prototype](docs/device.jpeg)
 
@@ -29,6 +29,9 @@ The device exposes a standard BLE GATT interface and is independent of any parti
 - **CCJ Gateway**: use the companion [CCJ Gateway repository](https://github.com/coauther/CCJ-Gateway) project to control the switch through a web interface.
 - **Other BLE clients**: use any smartphone app or hardware capable of writing standard BLE GATT commands.
 
+> [!NOTE]
+> **New Feature**: Firmware now supports external binary sensor expansion (door reed switches, PIR motion sensors, push buttons, etc.) reported via a unified BLE characteristic, which can be mapped directly to door, motion, or button entities in Home Assistant / ESPHome.
+
 ### Why the Name ZZK?
 
 ZZK is the roommate of CCJ, one of the project's original authors. Since ZZK usually goes to bed later, the nightly duty of turning off the lights naturally fell to him. The ZZK Switch Assistant took over that job—and inherited his name.
@@ -42,7 +45,7 @@ The first-generation design used an ESP32 with ESP-NOW for communication. Protot
 - **Optimized for low-power operation**: long battery life without an external power supply.
 - **Standard BLE protocol**: seamless integration into existing smart home setups.
 - **Modern wireless maintenance**: supports buttonless wireless OTA firmware updates.
-- **Extensible architecture**: open design ready for future home automation enhancements.
+- **Extensible sensor interface**: supports external door reed switches, PIR motion sensors, or mechanical push buttons, serving as both an actuator and a sensor node.
 
 ---
 
@@ -66,6 +69,10 @@ When using a standalone ESP32 running the CCJ Gateway, a local web interface pro
 
 ![CCJ Gateway Web Interface](docs/web-interface.png)
 
+### External Binary Sensor Setup
+
+![Door sensor installation example](docs/door-sensor-setup.jpeg)
+
 ---
 
 ## Hardware
@@ -88,8 +95,14 @@ When using a standalone ESP32 running the CCJ Gateway, a local web interface pro
 |---|---|---|
 | Boost converter enable | `D2` | Active LOW |
 | Servo control signal | `D3` | PWM (50 Hz) |
+| Sensor Channel 0 (Optional) | `D8` | External door reed switch, PIR sensor, push button, etc. |
+| Sensor Channel 1 (Optional) | `D9` | External door reed switch, PIR sensor, push button, etc. |
+| Sensor Channel 2 (Optional) | `D10` | External door reed switch, PIR sensor, push button, etc. |
 | Servo power supply | — | 5 V |
 | System power input | `BAT+` / `GND` | 3.3 V ~ 4.2 V |
+
+> [!TIP]
+> **Low-power consideration for normally-closed switches (sensors)**: If using a reed switch or normally-closed mechanical button, the internal 13 kΩ pull-up resistor draws ~250 µA continuously when closed. It is recommended to place an external high-value pull-up resistor (470 kΩ ~ 1 MΩ) between `3V3` and the input pin, and set the pin mode to `INPUT` in firmware, reducing standby current when closed to under 3.3 µA.
 
 For complete wiring details, refer to the [wiring schematic](docs/wiring-schematic.pdf): [![Wiring Schematic](docs/wiring-schematic.png)](docs/wiring-schematic.pdf) 
 
@@ -119,9 +132,10 @@ The battery sensing circuit is fully integrated into the Seeed Studio XIAO nRF52
 | **Switch Service** | `2d220000-516b-47bd-a33b-2c93889ac9b7` | — | — | Custom primary switch service |
 | └─ Switch Control | `2d220001-516b-47bd-a33b-2c93889ac9b7` | Write | `uint8` | Write `0x01` to turn ON, `0x00` to turn OFF; unacknowledged |
 | └─ Battery Level | `2d220002-516b-47bd-a33b-2c93889ac9b7` | Read, Notify | `uint8` | Remaining battery percentage (`0~100`) |
+| └─ Binary Sensors | `2d220003-516b-47bd-a33b-2c93889ac9b7` | Read, Notify | `uint8` | External binary sensor state bitmask |
 | **DFU Service** | `0000fe59-0000-1000-8000-00805f9b34fb` | — | — | Nordic Secure DFU OTA service |
 
-Both custom characteristics have open read/write permissions, requiring no pairing or link encryption.
+All custom characteristics have open read/write permissions, requiring no pairing or link encryption.
 
 ### Battery Measurement and Reporting Strategy
 
@@ -130,6 +144,14 @@ Both custom characteristics have open read/write permissions, requiring no pairi
 - **Dual-trigger reporting**:
   - **Immediate notification on connection**: writing to the CCCD triggers an immediate push of the current battery level without waiting for the timer.
   - **Periodic reporting**: a FreeRTOS software timer samples and notifies every 5 minutes.
+
+### Binary Sensor Measurement and Reporting Strategy
+
+- **Bitmask encoding**: Uses a 1-byte unsigned integer representing up to 8 independent channels. Defaults: `Bit 0` maps to D8 (e.g. door reed switch), `Bit 1` maps to D9 (e.g. PIR motion sensor), `Bit 2` maps to D10 (e.g. push button). 1 = Active/triggered, 0 = Inactive.
+- **Asynchronous debouncing and sleep**: Pins are monitored using low-power nRF52 PORT Event interrupts (`CHANGE` edge). On an interrupt, a one-shot FreeRTOS software timer (default 30 ms) is triggered in ISR context while the CPU returns to low-power sleep; pin states are sampled once the timer expires.
+- **Edge notification and instant synchronization**:
+  - **Edge push**: When stable pin states change, the full 1-byte state is pushed immediately via Notify.
+  - **Connection sync**: When a client writes to the CCCD to enable Notify, the firmware immediately pushes the current stable state, avoiding the need to wait for a physical edge transition.
 
 ---
 
@@ -142,6 +164,7 @@ The device is powered by a single 3.7 V Li-ion battery. To achieve months of bat
 | Dynamic servo power | Hardware enable gating | Keeps `D2` HIGH to shut down the 5 V boost converter, eliminating quiescent leakage from the servo and boost module |
 | FreeRTOS scheduling | `suspendLoop()` | Suspends the main loop task after `setup()`, eliminating CPU polling and switching entirely to event-driven execution |
 | Scheduled tasks | FreeRTOS software timer | Wakes the MCU only during battery sampling intervals (default 5 minutes), immediately returning to sleep |
+| Sensor interrupt & debouncing | PORT Event + One-shot timer | Wakes MCU via low-power SENSE interrupt; FreeRTOS software timer handles debouncing, preventing CPU busy-waiting and high-frequency clock draw |
 | Regulator mode | Internal DC-DC regulator enabled | Sets `NRF_POWER->DCDCEN`, significantly reducing standby and radio current compared to default LDO mode |
 | Peripheral shutdown | USB controller disabled | Clears `NRF_USBD->ENABLE`, turning off USB clocks and internal detection |
 | LED shutdown | All on-board LEDs disabled | Drives RGB LEDs HIGH and calls `Bluefruit.autoConnLed(false)` to disable BLE connection and advertising blinks |
@@ -175,6 +198,11 @@ cp src/config.h.example src/config.h
 | `SERVO_HOLD_MS` | `500` | Hold duration at the pressed position (ms) |
 | `SERVO_COOLDOWN_MS` | `500` | Cooldown buffer after returning to neutral before power gating (ms) |
 | `BATTERY_CHECK_MS` | `300000` | Battery sampling and reporting interval (ms, default 5 min) |
+| `ENABLE_BINARY_SENSORS` | `0` | Enable external binary sensor support (1 to enable, 0 to disable) |
+| `SENSOR_DEBOUNCE_MS` | `30` | Binary sensor debounce filter window (ms) |
+
+> [!TIP]
+> The `BINARY_SENSORS[]` array is self-adaptive. If only specific channels are needed (e.g., only a door sensor), unused entries can be removed directly, and the firmware will automatically adjust the channel count without attaching redundant interrupts.
 
 ### Build and Initial Flashing
 
@@ -221,7 +249,7 @@ The script automatically scans for `ZZK-SA2`, triggers a reboot into DFU mode, c
 Use an ESP32 running ESPHome as a BLE gateway to bridge the device into Home Assistant.
 
 > [!TIP]
-> For complete YAML configuration including battery sensors and a 180-second maintenance mode switch to release the BLE connection for OTA, see the [ESPHome Integration Guide](docs/esphome-guide.md).
+> For complete YAML configuration including battery level, external binary sensors (e.g. door reed switch), and a 180-second maintenance mode switch to release the BLE connection for OTA, see the [ESPHome Integration Guide](docs/esphome-guide.md).
 
 ### 2. CCJ Gateway (Alternative)
 
